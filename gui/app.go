@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -195,11 +196,22 @@ func (a *App) GetSystemStatus() (*SystemStatus, error) {
 	return &status, nil
 }
 
-// GetVersion returns the Mole CLI version.
+// GetVersion returns the Mole CLI version string (first line only).
 func (a *App) GetVersion() string {
 	output, err := runMoleCommand("--version")
 	if err != nil {
 		return "unknown"
+	}
+	// mo --version outputs multiple lines; extract just the version line.
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.Contains(line, "version") {
+			return line
+		}
+	}
+	if len(lines) > 0 {
+		return strings.TrimSpace(lines[0])
 	}
 	return output
 }
@@ -210,7 +222,7 @@ func (a *App) RunClean(dryRun bool) (string, error) {
 	if dryRun {
 		args = append(args, "--dry-run")
 	}
-	output, err := runMoleCommand(args...)
+	output, err := runMoleCommandLong(args...)
 	if err != nil {
 		return "", fmt.Errorf("clean failed: %w", err)
 	}
@@ -223,7 +235,7 @@ func (a *App) RunOptimize(dryRun bool) (string, error) {
 	if dryRun {
 		args = append(args, "--dry-run")
 	}
-	output, err := runMoleCommand(args...)
+	output, err := runMoleCommandLong(args...)
 	if err != nil {
 		return "", fmt.Errorf("optimize failed: %w", err)
 	}

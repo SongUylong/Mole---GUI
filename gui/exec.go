@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -15,7 +16,15 @@ import (
 var (
 	moleBinaryPath     string
 	moleBinaryPathOnce sync.Once
+
+	// ansiRegex strips ANSI escape sequences from terminal output.
+	ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 )
+
+// stripANSI removes all ANSI escape codes from a string.
+func stripANSI(s string) string {
+	return ansiRegex.ReplaceAllString(s, "")
+}
 
 // findMoleBinary locates the `mo` or `mole` binary on the system.
 func findMoleBinary() string {
@@ -67,23 +76,36 @@ func findMoleBinary() string {
 	return moleBinaryPath
 }
 
-// runMoleCommand executes a mole CLI command and returns the output.
+// runMoleCommand executes a mole CLI command and returns the stripped output.
 func runMoleCommand(args ...string) (string, error) {
+	return runMoleCommandWithTimeout(30*time.Second, args...)
+}
+
+// runMoleCommandLong executes a mole CLI command with extended timeout (for clean/optimize).
+func runMoleCommandLong(args ...string) (string, error) {
+	return runMoleCommandWithTimeout(120*time.Second, args...)
+}
+
+func runMoleCommandWithTimeout(timeout time.Duration, args ...string) (string, error) {
 	binary := findMoleBinary()
 	if binary == "" {
 		return "", fmt.Errorf("mole binary not found; install mole first (brew install mole)")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, binary, args...)
 
+	// Force non-interactive mode: connect stdin to /dev/null so bash's
+	// `-t 0` check fails and scripts skip interactive prompts (sudo, read_key).
+	cmd.Stdin = nil
+
 	// Ensure the command runs with a clean environment
 	cmd.Env = append(os.Environ(),
-		"TERM=dumb",       // Disable terminal escape codes
-		"NO_COLOR=1",      // Disable color output
-		"MO_NO_OPLOG=1",   // Disable operation logging
+		"TERM=dumb",
+		"NO_COLOR=1",
+		"MO_NO_OPLOG=1",
 	)
 
 	var stdout, stderr bytes.Buffer
@@ -91,12 +113,12 @@ func runMoleCommand(args ...string) (string, error) {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		errMsg := strings.TrimSpace(stderr.String())
+		errMsg := strings.TrimSpace(stripANSI(stderr.String()))
 		if errMsg == "" {
 			errMsg = err.Error()
 		}
 		return "", fmt.Errorf("command failed: %s", errMsg)
 	}
 
-	return strings.TrimSpace(stdout.String()), nil
+	return strings.TrimSpace(stripANSI(stdout.String())), nil
 }
