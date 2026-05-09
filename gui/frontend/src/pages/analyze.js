@@ -3,6 +3,38 @@ import { icon } from '../utils/icons.js';
 
 let currentPath = '';
 let pathHistory = [];
+let showSystemFiles = false;
+let lastResult = null;
+
+// Files/dirs that should never be deleted — critical for macOS operation
+const SYSTEM_PATTERNS = [
+  '.CFUserTextEncoding', '.Trash', '.cups', '.local', '.ssh', '.gnupg',
+  '.zshrc', '.zsh_history', '.zprofile', '.bashrc', '.bash_profile',
+  '.gitconfig', '.gitignore_global',
+  'Desktop', 'Documents', 'Downloads', 'Movies', 'Music', 'Pictures', 'Public',
+  'Library', 'Applications',
+];
+
+// Known safe-to-delete patterns (caches, build artifacts, etc.)
+const SAFE_DELETE_PATTERNS = [
+  'node_modules', '.npm', '.yarn', '.pnpm-store',
+  '.cache', 'Caches', '.gradle', '.m2', '.cocoapods',
+  'DerivedData', '__pycache__', '.pytest_cache',
+  'build', 'dist', '.next', '.nuxt',
+  '.docker', '.vagrant', '.terraform',
+  '.Trash',
+];
+
+function isSystemFile(name) {
+  if (SYSTEM_PATTERNS.includes(name)) return true;
+  // macOS system dotfiles
+  if (name === '.DS_Store') return true;
+  return false;
+}
+
+function isSafeToDelete(name) {
+  return SAFE_DELETE_PATTERNS.some(p => name === p || name.toLowerCase() === p.toLowerCase());
+}
 
 function sizeColor(bytes) {
   if (bytes >= 1e9) return 'var(--red)';
@@ -31,18 +63,24 @@ export function renderAnalyzePage(container) {
         <button class="action-btn" id="analyze-back" style="padding:6px 10px;" disabled>${icon('chevronRight',15)}</button>
         <button class="action-btn" id="analyze-home" style="padding:6px 10px;">${icon('hardDrive',15)}</button>
         <div id="analyze-path" style="flex:1;font-family:var(--font-mono);font-size:12px;color:var(--text-2);padding:7px 12px;background:var(--bg-input);border:1px solid var(--border-subtle);border-radius:var(--r-sm);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
+        <button class="action-btn" id="analyze-toggle-system" style="padding:6px 10px;font-size:11px;" title="Show/hide system files">${icon('eye',15)}</button>
         <button class="action-btn" id="analyze-refresh" style="padding:6px 10px;">${icon('activity',15)}</button>
+      </div>
+      <div id="analyze-legend" style="display:flex;gap:14px;margin-bottom:12px;font-size:10.5px;">
+        <span style="display:flex;align-items:center;gap:4px;color:var(--text-3);">${icon('shield',11)} <span style="color:var(--text-3)">Protected</span></span>
+        <span style="display:flex;align-items:center;gap:4px;color:var(--green);">${icon('sparkles',11)} <span style="color:var(--green)">Safe to clean</span></span>
+        <span id="system-toggle-label" style="display:flex;align-items:center;gap:4px;color:var(--text-3);">
+          ${icon('eye',11)} <span>System files: hidden</span>
+        </span>
       </div>
       <div id="analyze-content">
         <div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Scanning…</div></div>
       </div>
     </div>`;
 
-  // Style the back button to flip the chevron
   const backBtn = document.getElementById('analyze-back');
   if (backBtn) backBtn.querySelector('svg').style.transform = 'rotate(180deg)';
 
-  // Start scan
   scanPath('');
 
   document.getElementById('analyze-back')?.addEventListener('click', () => {
@@ -60,6 +98,27 @@ export function renderAnalyzePage(container) {
   document.getElementById('analyze-refresh')?.addEventListener('click', () => {
     scanPath(currentPath, false);
   });
+
+  document.getElementById('analyze-toggle-system')?.addEventListener('click', () => {
+    showSystemFiles = !showSystemFiles;
+    updateToggleLabel();
+    if (lastResult) {
+      const contentEl = document.getElementById('analyze-content');
+      if (contentEl) renderEntries(lastResult, contentEl);
+    }
+  });
+}
+
+function updateToggleLabel() {
+  const label = document.getElementById('system-toggle-label');
+  if (label) {
+    label.innerHTML = `${icon('eye',11)} <span>System files: ${showSystemFiles ? 'visible' : 'hidden'}</span>`;
+  }
+  const btn = document.getElementById('analyze-toggle-system');
+  if (btn) {
+    btn.style.borderColor = showSystemFiles ? 'var(--accent)' : 'var(--border-subtle)';
+    btn.style.color = showSystemFiles ? 'var(--accent)' : 'var(--text-2)';
+  }
 }
 
 async function scanPath(path, pushHistory = true) {
@@ -80,6 +139,7 @@ async function scanPath(path, pushHistory = true) {
 
   try {
     const result = await window.go.main.App.GetDiskAnalysis(path);
+    lastResult = result;
     renderEntries(result, contentEl);
   } catch (e) {
     contentEl.innerHTML = `<div style="padding:24px;text-align:center;color:var(--red);font-size:12.5px;">${icon('info',20)}<br><br>${e.toString()}</div>`;
@@ -93,17 +153,24 @@ function renderEntries(result, container) {
   }
 
   // Sort by size descending
-  const entries = [...result.entries].sort((a, b) => b.size - a.size);
+  let entries = [...result.entries].sort((a, b) => b.size - a.size);
+
+  // Filter system files if toggle is off
+  const totalAll = entries.length;
+  const hiddenCount = entries.filter(e => isSystemFile(e.name)).length;
+  if (!showSystemFiles) {
+    entries = entries.filter(e => !isSystemFile(e.name));
+  }
+
   const maxSize = entries[0]?.size || 1;
   const totalSize = entries.reduce((sum, e) => sum + e.size, 0);
-
-  // Show top entries (limit to prevent huge DOM)
   const shown = entries.slice(0, 100);
 
   container.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
       <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:0.06em;font-weight:600;">
         ${entries.length} items · ${formatBytes(totalSize)} total
+        ${!showSystemFiles && hiddenCount > 0 ? `<span style="opacity:0.5;"> · ${hiddenCount} system hidden</span>` : ''}
       </span>
       <span style="font-size:11px;color:var(--text-3);">Sorted by size</span>
     </div>
@@ -114,25 +181,40 @@ function renderEntries(result, container) {
   const list = document.getElementById('analyze-list');
 
   shown.forEach(entry => {
+    const isSys = isSystemFile(entry.name);
+    const isSafe = isSafeToDelete(entry.name);
+
     const row = document.createElement('div');
-    row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:var(--r-xs);cursor:default;transition:background 150ms;';
+    row.style.cssText = `display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:var(--r-xs);cursor:default;transition:background 150ms;${isSys ? 'opacity:0.45;' : ''}`;
     row.addEventListener('mouseenter', () => row.style.background = 'rgba(255,255,255,0.03)');
     row.addEventListener('mouseleave', () => row.style.background = 'transparent');
 
     const iconHtml = entry.is_dir
-      ? `<span style="color:var(--accent);flex-shrink:0;">${icon('hardDrive', 15)}</span>`
+      ? `<span style="color:${isSys ? 'var(--text-3)' : 'var(--accent)'};flex-shrink:0;">${icon('hardDrive', 15)}</span>`
       : `<span style="color:var(--text-3);flex-shrink:0;">${icon('monitor', 15)}</span>`;
 
-    const nameSpan = `<span style="flex:0 0 200px;font-size:12.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${entry.is_dir ? 'color:var(--text-1);cursor:pointer;' : 'color:var(--text-2);'}" title="${entry.path}" ${entry.is_dir ? `data-path="${entry.path}"` : ''}>${entry.name}${entry.is_dir ? '/' : ''}</span>`;
+    // Badge for system/safe
+    let badge = '';
+    if (isSys) {
+      badge = `<span style="flex-shrink:0;font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(255,255,255,0.06);color:var(--text-3);font-weight:600;letter-spacing:0.03em;" title="System file — do not delete">SYSTEM</span>`;
+    } else if (isSafe) {
+      badge = `<span style="flex-shrink:0;font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(74,222,128,0.1);color:var(--green);font-weight:600;letter-spacing:0.03em;" title="Safe to delete">SAFE</span>`;
+    }
+
+    const nameSpan = `<span style="flex:1;min-width:0;font-size:12.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${entry.is_dir ? 'color:var(--text-1);cursor:pointer;' : 'color:var(--text-2);'}" title="${entry.path}" ${entry.is_dir ? `data-path="${entry.path}"` : ''}>${entry.name}${entry.is_dir ? '/' : ''}</span>`;
 
     const barHtml = sizeBar(entry.size, maxSize);
     const sizeSpan = `<span style="flex:0 0 70px;text-align:right;font-size:11.5px;font-weight:500;font-variant-numeric:tabular-nums;color:${sizeColor(entry.size)};">${formatBytes(entry.size)}</span>`;
 
-    const deleteBtn = entry.size > 0
-      ? `<button class="analyze-delete-btn" data-path="${entry.path}" data-name="${entry.name}" data-size="${entry.size}" style="flex-shrink:0;background:none;border:1px solid var(--border-subtle);border-radius:var(--r-xs);padding:3px 6px;cursor:pointer;color:var(--text-3);transition:all 150ms;display:flex;align-items:center;" title="Delete">${icon('trash', 13)}</button>`
-      : '<span style="width:28px;"></span>';
+    // No delete button for system files
+    let deleteBtn = '<span style="width:28px;"></span>';
+    if (!isSys && entry.size > 0) {
+      deleteBtn = `<button class="analyze-delete-btn" data-path="${entry.path}" data-name="${entry.name}" data-size="${entry.size}" style="flex-shrink:0;background:none;border:1px solid var(--border-subtle);border-radius:var(--r-xs);padding:3px 6px;cursor:pointer;color:var(--text-3);transition:all 150ms;display:flex;align-items:center;" title="Delete">${icon('trash', 13)}</button>`;
+    } else if (isSys) {
+      deleteBtn = `<span style="flex-shrink:0;display:flex;align-items:center;color:var(--text-3);opacity:0.3;" title="Protected — cannot delete">${icon('shield', 13)}</span>`;
+    }
 
-    row.innerHTML = iconHtml + nameSpan + barHtml + sizeSpan + deleteBtn;
+    row.innerHTML = iconHtml + nameSpan + badge + barHtml + sizeSpan + deleteBtn;
     list.appendChild(row);
 
     // Directory click to drill down
@@ -152,16 +234,15 @@ function renderEntries(result, container) {
       btn.style.background = 'var(--red-soft)';
     });
     btn.addEventListener('mouseleave', () => {
-      btn.style.borderColor = 'var(--border-subtle)';
-      btn.style.color = 'var(--text-3)';
-      btn.style.background = 'none';
+      if (!btn.dataset.confirmed) {
+        btn.style.borderColor = 'var(--border-subtle)';
+        btn.style.color = 'var(--text-3)';
+        btn.style.background = 'none';
+      }
     });
     btn.addEventListener('click', async () => {
       const path = btn.dataset.path;
-      const name = btn.dataset.name;
-      const size = parseInt(btn.dataset.size);
 
-      // Inline confirm - change button to confirm state
       if (!btn.dataset.confirmed) {
         btn.dataset.confirmed = 'true';
         btn.innerHTML = `<span style="font-size:10px;font-weight:600;">Delete?</span>`;
@@ -169,7 +250,6 @@ function renderEntries(result, container) {
         btn.style.color = 'var(--red)';
         btn.style.background = 'var(--red-soft)';
         btn.style.padding = '3px 8px';
-        // Reset after 3 seconds
         setTimeout(() => {
           if (btn.dataset.confirmed) {
             delete btn.dataset.confirmed;
@@ -183,11 +263,9 @@ function renderEntries(result, container) {
         return;
       }
 
-      // Actually delete
       btn.innerHTML = `<span style="font-size:10px;">…</span>`;
       try {
         await window.go.main.App.DeletePath(path);
-        // Remove the row with animation
         const row = btn.closest('div');
         row.style.opacity = '0';
         row.style.transform = 'translateX(20px)';
