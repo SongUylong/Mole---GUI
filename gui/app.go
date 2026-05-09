@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // App struct provides the backend API for the Mole GUI.
@@ -217,29 +219,49 @@ func (a *App) GetVersion() string {
 }
 
 // RunClean triggers a cleanup scan. If dryRun is true, only previews what would be cleaned.
+// Streams output line-by-line via "clean:line" events, then returns the full output.
 func (a *App) RunClean(dryRun bool) (string, error) {
 	args := []string{"clean"}
 	if dryRun {
 		args = append(args, "--dry-run")
 	}
-	output, err := runMoleCommandLong(args...)
+
+	var lines []string
+	err := runMoleCommandStreaming(func(line string) {
+		lines = append(lines, line)
+		runtime.EventsEmit(a.ctx, "clean:line", line)
+	}, args...)
+
+	result := strings.Join(lines, "\n")
+	runtime.EventsEmit(a.ctx, "clean:done", result)
+
 	if err != nil {
-		return "", fmt.Errorf("clean failed: %w", err)
+		return result, fmt.Errorf("clean failed: %w", err)
 	}
-	return output, nil
+	return result, nil
 }
 
 // RunOptimize triggers system optimization. If dryRun is true, only previews.
+// Streams output line-by-line via "optimize:line" events.
 func (a *App) RunOptimize(dryRun bool) (string, error) {
 	args := []string{"optimize"}
 	if dryRun {
 		args = append(args, "--dry-run")
 	}
-	output, err := runMoleCommandLong(args...)
+
+	var lines []string
+	err := runMoleCommandStreaming(func(line string) {
+		lines = append(lines, line)
+		runtime.EventsEmit(a.ctx, "optimize:line", line)
+	}, args...)
+
+	result := strings.Join(lines, "\n")
+	runtime.EventsEmit(a.ctx, "optimize:done", result)
+
 	if err != nil {
-		return "", fmt.Errorf("optimize failed: %w", err)
+		return result, fmt.Errorf("optimize failed: %w", err)
 	}
-	return output, nil
+	return result, nil
 }
 
 // GetDiskAnalysis returns disk analysis for a given path.

@@ -9,24 +9,38 @@ const categories = [
   { name: 'Mail & Downloads', desc: 'Attachments, installers', icon: 'hardDrive', color: 'var(--cyan)' },
 ];
 
-let timerInterval = null;
-let confirmState = false;
+let cancelLineListener = null;
+let cancelDoneListener = null;
 
-function startTimer(elementId) {
-  const start = Date.now();
-  if (timerInterval) clearInterval(timerInterval);
-  timerInterval = setInterval(() => {
-    const el = document.getElementById(elementId);
-    if (!el) { clearInterval(timerInterval); return; }
-    const elapsed = Math.floor((Date.now() - start) / 1000);
-    const m = Math.floor(elapsed / 60);
-    const s = elapsed % 60;
-    el.textContent = m > 0 ? `${m}m ${s}s elapsed` : `${s}s elapsed`;
-  }, 1000);
+function esc(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function stopTimer() {
-  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+function setupStreamListeners(outputEl) {
+  // Clean up previous listeners
+  if (cancelLineListener) cancelLineListener();
+  if (cancelDoneListener) cancelDoneListener();
+
+  // Create the live terminal container
+  outputEl.innerHTML = `<div class="terminal-output" id="clean-terminal" style="min-height:60px;"></div>`;
+  const terminal = document.getElementById('clean-terminal');
+
+  // Listen for each line
+  cancelLineListener = window.runtime.EventsOn('clean:line', (line) => {
+    const lineEl = document.createElement('div');
+    lineEl.textContent = line;
+    terminal.appendChild(lineEl);
+    terminal.scrollTop = terminal.scrollHeight;
+  });
+
+  cancelDoneListener = window.runtime.EventsOn('clean:done', () => {
+    // Done — listeners will be cleaned up on next run
+  });
+}
+
+function cleanupListeners() {
+  if (cancelLineListener) { cancelLineListener(); cancelLineListener = null; }
+  if (cancelDoneListener) { cancelDoneListener(); cancelDoneListener = null; }
 }
 
 export function renderCleanPage(container) {
@@ -59,17 +73,15 @@ export function renderCleanPage(container) {
         <button class="action-btn action-btn-primary" id="clean-run">${icon('sparkles',15)} Clean Now</button>
       </div>
       <div id="clean-confirm" style="display:none;margin-top:14px;padding:16px;border-radius:var(--r-md);background:var(--red-soft);border:1px solid rgba(251,113,133,0.2);">
-        <div style="font-size:13px;font-weight:600;color:var(--red);margin-bottom:8px;">⚠ Confirm Cleanup</div>
-        <div style="font-size:12px;color:var(--text-2);margin-bottom:12px;">This will permanently delete cached files to free disk space. This action cannot be undone.</div>
+        <div style="font-size:13px;font-weight:600;color:var(--red);margin-bottom:8px;">${icon('info',16)} Confirm Cleanup</div>
+        <div style="font-size:12px;color:var(--text-2);margin-bottom:12px;">This will permanently delete cached files to free disk space.</div>
         <div style="display:flex;gap:8px;">
           <button class="action-btn action-btn-primary" id="clean-confirm-yes" style="background:var(--red-soft);border-color:var(--red);">${icon('sparkles',15)} Yes, Clean Now</button>
-          <button class="action-btn" id="clean-confirm-no">${icon('chevronRight',15)} Cancel</button>
+          <button class="action-btn" id="clean-confirm-no">Cancel</button>
         </div>
       </div>
       <div id="clean-output"></div>
     </div>`;
-
-  const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
   function setButtons(disabled) {
     document.querySelectorAll('#clean-actions .action-btn').forEach(b => {
@@ -79,60 +91,49 @@ export function renderCleanPage(container) {
     });
   }
 
-  function showProgress(msg) {
-    const o = document.getElementById('clean-output');
-    o.innerHTML = `<div class="loading-container" style="height:110px">
-      <div class="loading-spinner"></div>
-      <div class="loading-text">${msg}</div>
-      <div id="clean-timer" style="font-size:11px;color:var(--text-3);font-variant-numeric:tabular-nums;">0s elapsed</div>
-    </div>`;
-    startTimer('clean-timer');
-  }
-
-  // Preview button
-  document.getElementById('clean-preview')?.addEventListener('click', async () => {
-    document.getElementById('clean-confirm').style.display = 'none';
+  async function runClean(dryRun) {
     setButtons(true);
-    showProgress('Scanning system — this typically takes 1–2 minutes…');
+    document.getElementById('clean-confirm').style.display = 'none';
     const o = document.getElementById('clean-output');
+
+    // Setup live streaming terminal
+    setupStreamListeners(o);
+
     try {
-      const result = await window.go.main.App.RunClean(true);
-      stopTimer();
-      o.innerHTML = '<div class="terminal-output">' + esc(result) + '</div>';
+      await window.go.main.App.RunClean(dryRun);
     } catch(e) {
-      stopTimer();
-      o.innerHTML = '<div class="terminal-output" style="color:var(--red)">Error: ' + esc(e.toString()) + '</div>';
+      const terminal = document.getElementById('clean-terminal');
+      if (terminal) {
+        const errLine = document.createElement('div');
+        errLine.style.color = 'var(--red)';
+        errLine.textContent = 'Error: ' + e.toString();
+        terminal.appendChild(errLine);
+      }
     } finally {
+      cleanupListeners();
       setButtons(false);
     }
+  }
+
+  // Preview
+  document.getElementById('clean-preview')?.addEventListener('click', () => {
+    document.getElementById('clean-confirm').style.display = 'none';
+    runClean(true);
   });
 
-  // Clean Now button → show inline confirm
+  // Clean Now → show confirm
   document.getElementById('clean-run')?.addEventListener('click', () => {
     document.getElementById('clean-confirm').style.display = 'block';
     document.getElementById('clean-output').innerHTML = '';
   });
 
-  // Cancel confirm
+  // Cancel
   document.getElementById('clean-confirm-no')?.addEventListener('click', () => {
     document.getElementById('clean-confirm').style.display = 'none';
   });
 
-  // Actually run clean
-  document.getElementById('clean-confirm-yes')?.addEventListener('click', async () => {
-    document.getElementById('clean-confirm').style.display = 'none';
-    setButtons(true);
-    showProgress('Cleaning system — scanning and removing files (2–3 minutes)…');
-    const o = document.getElementById('clean-output');
-    try {
-      const result = await window.go.main.App.RunClean(false);
-      stopTimer();
-      o.innerHTML = '<div class="terminal-output">' + esc(result) + '</div>';
-    } catch(e) {
-      stopTimer();
-      o.innerHTML = '<div class="terminal-output" style="color:var(--red)">Error: ' + esc(e.toString()) + '</div>';
-    } finally {
-      setButtons(false);
-    }
+  // Confirmed → run
+  document.getElementById('clean-confirm-yes')?.addEventListener('click', () => {
+    runClean(false);
   });
 }

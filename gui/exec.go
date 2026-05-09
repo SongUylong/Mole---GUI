@@ -127,3 +127,76 @@ func runMoleCommandWithTimeout(timeout time.Duration, args ...string) (string, e
 
 	return strings.TrimSpace(stripANSI(stdout.String())), nil
 }
+
+// runMoleCommandStreaming executes a command and streams stdout line-by-line
+// via a callback function. Used for clean/optimize to show live progress.
+func runMoleCommandStreaming(onLine func(string), args ...string) error {
+	binary := findMoleBinary()
+	if binary == "" {
+		return fmt.Errorf("mole binary not found; install mole first (brew install mole)")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, binary, args...)
+
+	devNull, err := os.Open(os.DevNull)
+	if err == nil {
+		cmd.Stdin = devNull
+		defer devNull.Close()
+	}
+
+	cmd.Env = append(os.Environ(),
+		"TERM=dumb",
+		"NO_COLOR=1",
+		"MO_NO_OPLOG=1",
+	)
+
+	// Get a pipe to read stdout line by line
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+
+	cmd.Stderr = nil // ignore stderr for streaming
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start command: %w", err)
+	}
+
+	// Read line by line and emit events
+	buf := make([]byte, 0, 4096)
+	tmp := make([]byte, 256)
+	for {
+		n, readErr := stdoutPipe.Read(tmp)
+		if n > 0 {
+			buf = append(buf, tmp[:n]...)
+			// Process complete lines
+			for {
+				idx := bytes.IndexByte(buf, '\n')
+				if idx < 0 {
+					break
+				}
+				line := stripANSI(strings.TrimRight(string(buf[:idx]), "\r"))
+				buf = buf[idx+1:]
+				if line != "" {
+					onLine(line)
+				}
+			}
+		}
+		if readErr != nil {
+			break
+		}
+	}
+
+	// Flush any remaining partial line
+	if len(buf) > 0 {
+		line := stripANSI(strings.TrimRight(string(buf), "\r\n"))
+		if line != "" {
+			onLine(line)
+		}
+	}
+
+	return cmd.Wait()
+}
