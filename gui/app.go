@@ -313,8 +313,14 @@ type AnalyzeEntry struct {
 
 // GetDiskAnalysis returns disk analysis for a given path as parsed JSON.
 func (a *App) GetDiskAnalysis(path string) (*AnalyzeResult, error) {
+	home, _ := os.UserHomeDir()
 	if path == "" {
-		home, _ := os.UserHomeDir()
+		path = home
+	}
+	// Expand ~ to home directory
+	if strings.HasPrefix(path, "~/") {
+		path = filepath.Join(home, path[2:])
+	} else if path == "~" {
 		path = home
 	}
 	args := []string{"analyze", "--json", path}
