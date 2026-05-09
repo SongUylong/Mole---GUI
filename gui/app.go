@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -216,6 +217,37 @@ func (a *App) GetVersion() string {
 		return strings.TrimSpace(lines[0])
 	}
 	return output
+}
+
+// RequestSudo presents a native macOS password dialog and caches sudo credentials.
+// Returns true if sudo was successfully cached, false if cancelled.
+func (a *App) RequestSudo() (bool, error) {
+	// Present native macOS password dialog using osascript
+	script := `text returned of (display dialog "Mole needs admin access for full system cleanup." & return & return & "Enter your password:" default answer "" with hidden answer buttons {"Cancel", "OK"} default button "OK" with title "Mole — Admin Access" with icon caution)`
+	out, err := exec.Command("osascript", "-e", script).Output()
+	if err != nil {
+		// User clicked Cancel or dialog failed
+		return false, nil
+	}
+	password := strings.TrimSpace(string(out))
+	if password == "" {
+		return false, nil
+	}
+
+	// Cache sudo credentials using the password
+	cmd := exec.Command("sudo", "-S", "-v")
+	cmd.Stdin = strings.NewReader(password + "\n")
+	cmd.Env = append(cmd.Environ(), "SUDO_PROMPT=")
+	if err := cmd.Run(); err != nil {
+		return false, fmt.Errorf("authentication failed — wrong password")
+	}
+	return true, nil
+}
+
+// HasSudo checks if a sudo session is already cached.
+func (a *App) HasSudo() bool {
+	err := exec.Command("sudo", "-n", "true").Run()
+	return err == nil
 }
 
 // RunClean triggers a cleanup scan. If dryRun is true, only previews what would be cleaned.

@@ -10,37 +10,25 @@ const categories = [
 ];
 
 let cancelLineListener = null;
-let cancelDoneListener = null;
 
 function esc(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 function setupStreamListeners(outputEl) {
-  // Clean up previous listeners
   if (cancelLineListener) cancelLineListener();
-  if (cancelDoneListener) cancelDoneListener();
-
-  // Create the live terminal container
   outputEl.innerHTML = `<div class="terminal-output" id="clean-terminal" style="min-height:60px;"></div>`;
   const terminal = document.getElementById('clean-terminal');
-
-  // Listen for each line
   cancelLineListener = window.runtime.EventsOn('clean:line', (line) => {
     const lineEl = document.createElement('div');
     lineEl.textContent = line;
     terminal.appendChild(lineEl);
     terminal.scrollTop = terminal.scrollHeight;
   });
-
-  cancelDoneListener = window.runtime.EventsOn('clean:done', () => {
-    // Done — listeners will be cleaned up on next run
-  });
 }
 
 function cleanupListeners() {
   if (cancelLineListener) { cancelLineListener(); cancelLineListener = null; }
-  if (cancelDoneListener) { cancelDoneListener(); cancelDoneListener = null; }
 }
 
 export function renderCleanPage(container) {
@@ -64,14 +52,17 @@ export function renderCleanPage(container) {
     <div class="card animate-in animate-in-delay-2">
       <div class="card-header">
         <span class="card-title">${icon('sparkles',14)} Cleanup</span>
+        <span id="sudo-badge"></span>
       </div>
       <p style="color:var(--text-2);font-size:12.5px;margin-bottom:16px;line-height:1.6">
-        Mole scans all categories above and safely removes unnecessary files. Use preview first to see what will be cleaned.
+        Mole scans all categories and safely removes unnecessary files. Enable admin access for full system-level cleanup.
       </p>
       <div class="quick-actions" id="clean-actions">
-        <button class="action-btn" id="clean-preview">${icon('eye',15)} Preview (Dry Run)</button>
+        <button class="action-btn" id="clean-preview">${icon('eye',15)} Preview</button>
         <button class="action-btn action-btn-primary" id="clean-run">${icon('sparkles',15)} Clean Now</button>
+        <button class="action-btn" id="clean-sudo">${icon('shield',15)} Enable Admin</button>
       </div>
+      <div id="sudo-status" style="margin-top:10px;font-size:11.5px;"></div>
       <div id="clean-confirm" style="display:none;margin-top:14px;padding:16px;border-radius:var(--r-md);background:var(--red-soft);border:1px solid rgba(251,113,133,0.2);">
         <div style="font-size:13px;font-weight:600;color:var(--red);margin-bottom:8px;">${icon('info',16)} Confirm Cleanup</div>
         <div style="font-size:12px;color:var(--text-2);margin-bottom:12px;">This will permanently delete cached files to free disk space.</div>
@@ -83,6 +74,9 @@ export function renderCleanPage(container) {
       <div id="clean-output"></div>
     </div>`;
 
+  // Check sudo status on load
+  checkSudoStatus();
+
   function setButtons(disabled) {
     document.querySelectorAll('#clean-actions .action-btn').forEach(b => {
       b.disabled = disabled;
@@ -91,14 +85,46 @@ export function renderCleanPage(container) {
     });
   }
 
+  async function checkSudoStatus() {
+    try {
+      const hasSudo = await window.go.main.App.HasSudo();
+      const badge = document.getElementById('sudo-badge');
+      const status = document.getElementById('sudo-status');
+      if (hasSudo) {
+        badge.innerHTML = '<span class="badge badge-success">Admin Active</span>';
+        status.innerHTML = `<span style="color:var(--green)">${icon('shield',13)} Full system cleanup enabled</span>`;
+      } else {
+        badge.innerHTML = '<span class="badge badge-muted">User Only</span>';
+        status.innerHTML = `<span style="color:var(--text-3)">${icon('info',13)} Click "Enable Admin" for full system-level cleanup</span>`;
+      }
+    } catch(e) {}
+  }
+
+  // Enable Admin button
+  document.getElementById('clean-sudo')?.addEventListener('click', async () => {
+    const status = document.getElementById('sudo-status');
+    status.innerHTML = `<span style="color:var(--text-2)">Requesting admin access…</span>`;
+    try {
+      const [ok, err] = await Promise.all([
+        window.go.main.App.RequestSudo()
+      ]).then(r => [r[0], null]).catch(e => [false, e]);
+      if (err) {
+        status.innerHTML = `<span style="color:var(--red)">${icon('info',13)} ${esc(err.toString())}</span>`;
+      } else if (ok) {
+        checkSudoStatus();
+      } else {
+        status.innerHTML = `<span style="color:var(--text-3)">${icon('info',13)} Cancelled — running without admin</span>`;
+      }
+    } catch(e) {
+      status.innerHTML = `<span style="color:var(--red)">${icon('info',13)} ${esc(e.toString())}</span>`;
+    }
+  });
+
   async function runClean(dryRun) {
     setButtons(true);
     document.getElementById('clean-confirm').style.display = 'none';
     const o = document.getElementById('clean-output');
-
-    // Setup live streaming terminal
     setupStreamListeners(o);
-
     try {
       await window.go.main.App.RunClean(dryRun);
     } catch(e) {
@@ -112,27 +138,24 @@ export function renderCleanPage(container) {
     } finally {
       cleanupListeners();
       setButtons(false);
+      checkSudoStatus();
     }
   }
 
-  // Preview
   document.getElementById('clean-preview')?.addEventListener('click', () => {
     document.getElementById('clean-confirm').style.display = 'none';
     runClean(true);
   });
 
-  // Clean Now → show confirm
   document.getElementById('clean-run')?.addEventListener('click', () => {
     document.getElementById('clean-confirm').style.display = 'block';
     document.getElementById('clean-output').innerHTML = '';
   });
 
-  // Cancel
   document.getElementById('clean-confirm-no')?.addEventListener('click', () => {
     document.getElementById('clean-confirm').style.display = 'none';
   });
 
-  // Confirmed → run
   document.getElementById('clean-confirm-yes')?.addEventListener('click', () => {
     runClean(false);
   });
