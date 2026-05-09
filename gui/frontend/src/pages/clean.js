@@ -10,6 +10,7 @@ const categories = [
 ];
 
 let timerInterval = null;
+let confirmState = false;
 
 function startTimer(elementId) {
   const start = Date.now();
@@ -57,6 +58,14 @@ export function renderCleanPage(container) {
         <button class="action-btn" id="clean-preview">${icon('eye',15)} Preview (Dry Run)</button>
         <button class="action-btn action-btn-primary" id="clean-run">${icon('sparkles',15)} Clean Now</button>
       </div>
+      <div id="clean-confirm" style="display:none;margin-top:14px;padding:16px;border-radius:var(--r-md);background:var(--red-soft);border:1px solid rgba(251,113,133,0.2);">
+        <div style="font-size:13px;font-weight:600;color:var(--red);margin-bottom:8px;">⚠ Confirm Cleanup</div>
+        <div style="font-size:12px;color:var(--text-2);margin-bottom:12px;">This will permanently delete cached files to free disk space. This action cannot be undone.</div>
+        <div style="display:flex;gap:8px;">
+          <button class="action-btn action-btn-primary" id="clean-confirm-yes" style="background:var(--red-soft);border-color:var(--red);">${icon('sparkles',15)} Yes, Clean Now</button>
+          <button class="action-btn" id="clean-confirm-no">${icon('chevronRight',15)} Cancel</button>
+        </div>
+      </div>
       <div id="clean-output"></div>
     </div>`;
 
@@ -80,7 +89,9 @@ export function renderCleanPage(container) {
     startTimer('clean-timer');
   }
 
+  // Preview button
   document.getElementById('clean-preview')?.addEventListener('click', async () => {
+    document.getElementById('clean-confirm').style.display = 'none';
     setButtons(true);
     showProgress('Scanning system — this typically takes 1–2 minutes…');
     const o = document.getElementById('clean-output');
@@ -96,8 +107,20 @@ export function renderCleanPage(container) {
     }
   });
 
-  document.getElementById('clean-run')?.addEventListener('click', async () => {
-    if (!confirm('This will permanently delete cached files to free disk space. Continue?')) return;
+  // Clean Now button → show inline confirm
+  document.getElementById('clean-run')?.addEventListener('click', () => {
+    document.getElementById('clean-confirm').style.display = 'block';
+    document.getElementById('clean-output').innerHTML = '';
+  });
+
+  // Cancel confirm
+  document.getElementById('clean-confirm-no')?.addEventListener('click', () => {
+    document.getElementById('clean-confirm').style.display = 'none';
+  });
+
+  // Actually run clean
+  document.getElementById('clean-confirm-yes')?.addEventListener('click', async () => {
+    document.getElementById('clean-confirm').style.display = 'none';
     setButtons(true);
     showProgress('Cleaning system — scanning and removing files (2–3 minutes)…');
     const o = document.getElementById('clean-output');
