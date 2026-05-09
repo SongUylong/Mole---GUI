@@ -99,7 +99,11 @@ func runMoleCommandWithTimeout(timeout time.Duration, args ...string) (string, e
 
 	// Force non-interactive mode: connect stdin to /dev/null so bash's
 	// `-t 0` check fails and scripts skip interactive prompts (sudo, read_key).
-	cmd.Stdin = nil
+	devNull, err := os.Open(os.DevNull)
+	if err == nil {
+		cmd.Stdin = devNull
+		defer devNull.Close()
+	}
 
 	// Ensure the command runs with a clean environment
 	cmd.Env = append(os.Environ(),

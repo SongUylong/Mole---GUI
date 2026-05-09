@@ -31,7 +31,7 @@ export function renderOptimizePage(container) {
       <p style="color:var(--text-2);font-size:12.5px;margin-bottom:16px;line-height:1.6">
         Run all optimization steps above. Use preview to see what will change without modifying anything.
       </p>
-      <div class="quick-actions">
+      <div class="quick-actions" id="opt-actions">
         <button class="action-btn" id="opt-preview">${icon('eye',15)} Preview (Dry Run)</button>
         <button class="action-btn action-btn-primary" id="opt-run">${icon('zap',15)} Optimize Now</button>
       </div>
@@ -39,20 +39,48 @@ export function renderOptimizePage(container) {
     </div>`;
 
   const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  const spin = '<div class="loading-container" style="height:80px"><div class="loading-spinner"></div><div class="loading-text">Running…</div></div>';
+
+  function setButtonsDisabled(disabled) {
+    const btns = document.querySelectorAll('#opt-actions .action-btn');
+    btns.forEach(b => {
+      b.disabled = disabled;
+      b.style.opacity = disabled ? '0.5' : '1';
+      b.style.pointerEvents = disabled ? 'none' : 'auto';
+    });
+  }
 
   document.getElementById('opt-preview')?.addEventListener('click', async () => {
     const o = document.getElementById('opt-output');
-    o.innerHTML = spin;
-    try { o.innerHTML = '<div class="terminal-output">'+esc(await window.go.main.App.RunOptimize(true))+'</div>'; }
-    catch(e) { o.innerHTML = '<div class="terminal-output" style="color:var(--red)">'+esc(e.toString())+'</div>'; }
+    setButtonsDisabled(true);
+    o.innerHTML = `<div class="loading-container" style="height:100px">
+      <div class="loading-spinner"></div>
+      <div class="loading-text">Checking optimizations…</div>
+    </div>`;
+    try {
+      const result = await window.go.main.App.RunOptimize(true);
+      o.innerHTML = '<div class="terminal-output">' + esc(result) + '</div>';
+    } catch(e) {
+      o.innerHTML = '<div class="terminal-output" style="color:var(--red)">Error: ' + esc(e.toString()) + '</div>';
+    } finally {
+      setButtonsDisabled(false);
+    }
   });
 
   document.getElementById('opt-run')?.addEventListener('click', async () => {
     if (!confirm('This will modify system caches and services. Continue?')) return;
     const o = document.getElementById('opt-output');
-    o.innerHTML = spin;
-    try { o.innerHTML = '<div class="terminal-output">'+esc(await window.go.main.App.RunOptimize(false))+'</div>'; }
-    catch(e) { o.innerHTML = '<div class="terminal-output" style="color:var(--red)">'+esc(e.toString())+'</div>'; }
+    setButtonsDisabled(true);
+    o.innerHTML = `<div class="loading-container" style="height:100px">
+      <div class="loading-spinner"></div>
+      <div class="loading-text">Optimizing system…</div>
+    </div>`;
+    try {
+      const result = await window.go.main.App.RunOptimize(false);
+      o.innerHTML = '<div class="terminal-output">' + esc(result) + '</div>';
+    } catch(e) {
+      o.innerHTML = '<div class="terminal-output" style="color:var(--red)">Error: ' + esc(e.toString()) + '</div>';
+    } finally {
+      setButtonsDisabled(false);
+    }
   });
 }

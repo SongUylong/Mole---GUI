@@ -34,7 +34,7 @@ export function renderCleanPage(container) {
       <p style="color:var(--text-2);font-size:12.5px;margin-bottom:16px;line-height:1.6">
         Mole scans all categories above and safely removes unnecessary files. Use preview to inspect what will be cleaned before deleting.
       </p>
-      <div class="quick-actions">
+      <div class="quick-actions" id="clean-actions">
         <button class="action-btn" id="clean-preview">${icon('eye',15)} Preview (Dry Run)</button>
         <button class="action-btn action-btn-primary" id="clean-run">${icon('sparkles',15)} Clean Now</button>
       </div>
@@ -42,20 +42,48 @@ export function renderCleanPage(container) {
     </div>`;
 
   const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  const spin = '<div class="loading-container" style="height:80px"><div class="loading-spinner"></div><div class="loading-text">Scanning…</div></div>';
+
+  function setButtonsDisabled(disabled) {
+    const btns = document.querySelectorAll('#clean-actions .action-btn');
+    btns.forEach(b => {
+      b.disabled = disabled;
+      b.style.opacity = disabled ? '0.5' : '1';
+      b.style.pointerEvents = disabled ? 'none' : 'auto';
+    });
+  }
 
   document.getElementById('clean-preview')?.addEventListener('click', async () => {
     const o = document.getElementById('clean-output');
-    o.innerHTML = spin;
-    try { o.innerHTML = '<div class="terminal-output">'+esc(await window.go.main.App.RunClean(true))+'</div>'; }
-    catch(e) { o.innerHTML = '<div class="terminal-output" style="color:var(--red)">'+esc(e.toString())+'</div>'; }
+    setButtonsDisabled(true);
+    o.innerHTML = `<div class="loading-container" style="height:100px">
+      <div class="loading-spinner"></div>
+      <div class="loading-text">Scanning system — this may take up to 2 minutes…</div>
+    </div>`;
+    try {
+      const result = await window.go.main.App.RunClean(true);
+      o.innerHTML = '<div class="terminal-output">' + esc(result) + '</div>';
+    } catch(e) {
+      o.innerHTML = '<div class="terminal-output" style="color:var(--red)">Error: ' + esc(e.toString()) + '</div>';
+    } finally {
+      setButtonsDisabled(false);
+    }
   });
 
   document.getElementById('clean-run')?.addEventListener('click', async () => {
     if (!confirm('This will permanently delete files. Continue?')) return;
     const o = document.getElementById('clean-output');
-    o.innerHTML = spin.replace('Scanning','Cleaning');
-    try { o.innerHTML = '<div class="terminal-output">'+esc(await window.go.main.App.RunClean(false))+'</div>'; }
-    catch(e) { o.innerHTML = '<div class="terminal-output" style="color:var(--red)">'+esc(e.toString())+'</div>'; }
+    setButtonsDisabled(true);
+    o.innerHTML = `<div class="loading-container" style="height:100px">
+      <div class="loading-spinner"></div>
+      <div class="loading-text">Cleaning system — this may take a few minutes…</div>
+    </div>`;
+    try {
+      const result = await window.go.main.App.RunClean(false);
+      o.innerHTML = '<div class="terminal-output">' + esc(result) + '</div>';
+    } catch(e) {
+      o.innerHTML = '<div class="terminal-output" style="color:var(--red)">Error: ' + esc(e.toString()) + '</div>';
+    } finally {
+      setButtonsDisabled(false);
+    }
   });
 }
