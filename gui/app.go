@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -296,15 +298,73 @@ func (a *App) RunOptimize(dryRun bool) (string, error) {
 	return result, nil
 }
 
-// GetDiskAnalysis returns disk analysis for a given path.
-func (a *App) GetDiskAnalysis(path string) (string, error) {
-	args := []string{"analyze", "--json"}
-	if path != "" {
-		args = append(args, path)
+// AnalyzeResult is the JSON output from mo analyze --json.
+type AnalyzeResult struct {
+	Path    string         `json:"path"`
+	Entries []AnalyzeEntry `json:"entries"`
+}
+
+type AnalyzeEntry struct {
+	Name  string `json:"name"`
+	Path  string `json:"path"`
+	Size  int64  `json:"size"`
+	IsDir bool   `json:"is_dir"`
+}
+
+// GetDiskAnalysis returns disk analysis for a given path as parsed JSON.
+func (a *App) GetDiskAnalysis(path string) (*AnalyzeResult, error) {
+	if path == "" {
+		home, _ := os.UserHomeDir()
+		path = home
 	}
-	output, err := runMoleCommand(args...)
+	args := []string{"analyze", "--json", path}
+	output, err := runMoleCommandLong(args...)
 	if err != nil {
-		return "", fmt.Errorf("analyze failed: %w", err)
+		return nil, fmt.Errorf("analyze failed: %w", err)
 	}
-	return output, nil
+
+	var result AnalyzeResult
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse analyze JSON: %w", err)
+	}
+	return &result, nil
+}
+
+// DeletePath removes a file or directory. Returns bytes freed.
+func (a *App) DeletePath(path string) (int64, error) {
+	if path == "" {
+		return 0, fmt.Errorf("empty path")
+	}
+
+	// Safety: refuse to delete system-critical paths
+	forbidden := []string{"/", "/System", "/Library", "/Applications", "/usr", "/bin", "/sbin", "/var", "/etc", "/Users"}
+	for _, f := range forbidden {
+		if path == f {
+			return 0, fmt.Errorf("refusing to delete system path: %s", path)
+		}
+	}
+
+	info, err := os.Lstat(path)
+	if err != nil {
+		return 0, fmt.Errorf("path not found: %w", err)
+	}
+
+	var size int64
+	if info.IsDir() {
+		// Walk to calculate size first
+		filepath.Walk(path, func(_ string, fi os.FileInfo, _ error) error {
+			if fi != nil && !fi.IsDir() {
+				size += fi.Size()
+			}
+			return nil
+		})
+	} else {
+		size = info.Size()
+	}
+
+	if err := os.RemoveAll(path); err != nil {
+		return 0, fmt.Errorf("delete failed: %w", err)
+	}
+
+	return size, nil
 }
