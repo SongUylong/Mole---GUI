@@ -9,6 +9,25 @@ const steps = [
   { title: 'Rebuild Spotlight index', desc: 'Re-index your drive for faster search' },
 ];
 
+let timerInterval = null;
+
+function startTimer(elementId) {
+  const start = Date.now();
+  if (timerInterval) clearInterval(timerInterval);
+  timerInterval = setInterval(() => {
+    const el = document.getElementById(elementId);
+    if (!el) { clearInterval(timerInterval); return; }
+    const elapsed = Math.floor((Date.now() - start) / 1000);
+    const m = Math.floor(elapsed / 60);
+    const s = elapsed % 60;
+    el.textContent = m > 0 ? `${m}m ${s}s elapsed` : `${s}s elapsed`;
+  }, 1000);
+}
+
+function stopTimer() {
+  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+}
+
 export function renderOptimizePage(container) {
   const stepHTML = steps.map((s, i) => `
     <div class="step-item">
@@ -40,47 +59,54 @@ export function renderOptimizePage(container) {
 
   const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
-  function setButtonsDisabled(disabled) {
-    const btns = document.querySelectorAll('#opt-actions .action-btn');
-    btns.forEach(b => {
+  function setButtons(disabled) {
+    document.querySelectorAll('#opt-actions .action-btn').forEach(b => {
       b.disabled = disabled;
-      b.style.opacity = disabled ? '0.5' : '1';
+      b.style.opacity = disabled ? '0.4' : '1';
       b.style.pointerEvents = disabled ? 'none' : 'auto';
     });
   }
 
-  document.getElementById('opt-preview')?.addEventListener('click', async () => {
+  function showProgress(msg) {
     const o = document.getElementById('opt-output');
-    setButtonsDisabled(true);
-    o.innerHTML = `<div class="loading-container" style="height:100px">
+    o.innerHTML = `<div class="loading-container" style="height:110px">
       <div class="loading-spinner"></div>
-      <div class="loading-text">Checking optimizations…</div>
+      <div class="loading-text">${msg}</div>
+      <div id="opt-timer" style="font-size:11px;color:var(--text-3);font-variant-numeric:tabular-nums;">0s elapsed</div>
     </div>`;
+    startTimer('opt-timer');
+  }
+
+  document.getElementById('opt-preview')?.addEventListener('click', async () => {
+    setButtons(true);
+    showProgress('Checking optimizations…');
+    const o = document.getElementById('opt-output');
     try {
       const result = await window.go.main.App.RunOptimize(true);
+      stopTimer();
       o.innerHTML = '<div class="terminal-output">' + esc(result) + '</div>';
     } catch(e) {
+      stopTimer();
       o.innerHTML = '<div class="terminal-output" style="color:var(--red)">Error: ' + esc(e.toString()) + '</div>';
     } finally {
-      setButtonsDisabled(false);
+      setButtons(false);
     }
   });
 
   document.getElementById('opt-run')?.addEventListener('click', async () => {
     if (!confirm('This will modify system caches and services. Continue?')) return;
+    setButtons(true);
+    showProgress('Optimizing system — this may take a minute…');
     const o = document.getElementById('opt-output');
-    setButtonsDisabled(true);
-    o.innerHTML = `<div class="loading-container" style="height:100px">
-      <div class="loading-spinner"></div>
-      <div class="loading-text">Optimizing system…</div>
-    </div>`;
     try {
       const result = await window.go.main.App.RunOptimize(false);
+      stopTimer();
       o.innerHTML = '<div class="terminal-output">' + esc(result) + '</div>';
     } catch(e) {
+      stopTimer();
       o.innerHTML = '<div class="terminal-output" style="color:var(--red)">Error: ' + esc(e.toString()) + '</div>';
     } finally {
-      setButtonsDisabled(false);
+      setButtons(false);
     }
   });
 }

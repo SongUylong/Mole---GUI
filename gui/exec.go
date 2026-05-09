@@ -82,8 +82,9 @@ func runMoleCommand(args ...string) (string, error) {
 }
 
 // runMoleCommandLong executes a mole CLI command with extended timeout (for clean/optimize).
+// Clean can take 2-3 minutes scanning+deleting, so we allow 5 minutes.
 func runMoleCommandLong(args ...string) (string, error) {
-	return runMoleCommandWithTimeout(120*time.Second, args...)
+	return runMoleCommandWithTimeout(300*time.Second, args...)
 }
 
 func runMoleCommandWithTimeout(timeout time.Duration, args ...string) (string, error) {
